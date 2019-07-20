@@ -47,7 +47,6 @@ var httpCodes = [...]int{
 	404,
 	409,
 	403,
-	401,
 	429,
 	400,
 	409,
@@ -56,6 +55,7 @@ var httpCodes = [...]int{
 	500,
 	503,
 	500,
+	401,
 }
 
 func canonicalCodeString(code int32) string {
