@@ -8,68 +8,52 @@ package datadog
 import (
 	"encoding/binary"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"go.opencensus.io/trace"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 )
 
-// canonicalCodes maps (*trace.SpanData).Status.Code to their description. See:
+// statusCodes maps (*trace.SpanData).Status.Code to their message and http code. See:
 // https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto.
-var canonicalCodes = [...]string{
-	"ok",
-	"cancelled",
-	"unknown",
-	"invalid_argument",
-	"deadline_exceeded",
-	"not_found",
-	"already_exists",
-	"permission_denied",
-	"resource_exhausted",
-	"failed_precondition",
-	"aborted",
-	"out_of_range",
-	"unimplemented",
-	"internal",
-	"unavailable",
-	"data_loss",
-	"unauthenticated",
+var statusCodes = map[int32]statusCode{
+	trace.StatusCodeOK:                 {message: "ok", httpCode: http.StatusOK},
+	trace.StatusCodeCancelled:          {message: "cancelled", httpCode: 499},
+	trace.StatusCodeUnknown:            {message: "unknown", httpCode: http.StatusInternalServerError},
+	trace.StatusCodeInvalidArgument:    {message: "invalid_argument", httpCode: http.StatusBadRequest},
+	trace.StatusCodeDeadlineExceeded:   {message: "deadline_exceeded", httpCode: http.StatusGatewayTimeout},
+	trace.StatusCodeNotFound:           {message: "not_found", httpCode: http.StatusNotFound},
+	trace.StatusCodeAlreadyExists:      {message: "already_exists", httpCode: http.StatusConflict},
+	trace.StatusCodePermissionDenied:   {message: "permission_denied", httpCode: http.StatusForbidden},
+	trace.StatusCodeResourceExhausted:  {message: "resource_exhausted", httpCode: http.StatusTooManyRequests},
+	trace.StatusCodeFailedPrecondition: {message: "failed_precondition", httpCode: http.StatusBadRequest},
+	trace.StatusCodeAborted:            {message: "aborted", httpCode: http.StatusConflict},
+	trace.StatusCodeOutOfRange:         {message: "out_of_range", httpCode: http.StatusBadRequest},
+	trace.StatusCodeUnimplemented:      {message: "unimplemented", httpCode: http.StatusNotImplemented},
+	trace.StatusCodeInternal:           {message: "internal", httpCode: http.StatusInternalServerError},
+	trace.StatusCodeUnavailable:        {message: "unavailable", httpCode: http.StatusServiceUnavailable},
+	trace.StatusCodeDataLoss:           {message: "data_loss", httpCode: http.StatusNotImplemented},
+	trace.StatusCodeUnauthenticated:    {message: "unauthenticated", httpCode: http.StatusUnauthorized},
 }
 
-// httpCodes maps (*trace.SpanData).Status.Code to their HTTP Mapping. See:
-// https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto.
-var httpCodes = [...]int{
-	200,
-	499,
-	500,
-	400,
-	504,
-	404,
-	409,
-	403,
-	429,
-	400,
-	409,
-	400,
-	501,
-	500,
-	503,
-	500,
-	401,
+type statusCode struct {
+	message  string
+	httpCode int
 }
 
-func canonicalCodeString(code int32) string {
-	if code < 0 || int(code) >= len(canonicalCodes) {
-		return "error code " + strconv.FormatInt(int64(code), 10)
+func statusMessage(code int32) string {
+	if sc, exists := statusCodes[code]; exists {
+		return sc.message
 	}
-	return canonicalCodes[code]
+	return "error code " + strconv.FormatInt(int64(code), 10)
 }
 
-func httpCodeInt(code int32) int {
-	if code < 0 || int(code) >= len(httpCodes) {
-		return 500
+func httpCode(code int32) int {
+	if sc, exists := statusCodes[code]; exists {
+		return sc.httpCode
 	}
-	return httpCodes[code]
+	return 500
 }
 
 // convertSpan takes an OpenCensus span and returns a Datadog span.
@@ -90,7 +74,7 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 		span.ParentID = binary.BigEndian.Uint64(s.ParentSpanID[:])
 	}
 
-	httpCode := httpCodeInt(s.Status.Code)
+	httpCode := httpCode(s.Status.Code)
 	switch s.SpanKind {
 	case trace.SpanKindClient:
 		span.Type = "client"
@@ -109,14 +93,14 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 	}
 
 	if span.Error == 1 {
-		span.Meta[ext.ErrorType] = canonicalCodeString(s.Status.Code)
+		span.Meta[ext.ErrorType] = statusMessage(s.Status.Code)
 		if msg := s.Status.Message; msg != "" {
 			span.Meta[ext.ErrorMsg] = msg
 		}
 	}
 
 	span.Meta[keyStatusCode] = strconv.Itoa(int(s.Status.Code))
-	span.Meta[keyStatus] = canonicalCodeString(s.Status.Code)
+	span.Meta[keyStatus] = statusMessage(s.Status.Code)
 	if msg := s.Status.Message; msg != "" {
 		span.Meta[keyStatusDescription] = msg
 	}
