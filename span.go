@@ -36,11 +36,40 @@ var canonicalCodes = [...]string{
 	"unauthenticated",
 }
 
+// httpCodes maps (*trace.SpanData).Status.Code to their HTTP Mapping. See:
+// https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto.
+var httpCodes = [...]int{
+	200,
+	499,
+	500,
+	400,
+	504,
+	404,
+	409,
+	403,
+	401,
+	429,
+	400,
+	409,
+	400,
+	501,
+	500,
+	503,
+	500,
+}
+
 func canonicalCodeString(code int32) string {
 	if code < 0 || int(code) >= len(canonicalCodes) {
 		return "error code " + strconv.FormatInt(int64(code), 10)
 	}
 	return canonicalCodes[code]
+}
+
+func httpCodeInt(code int32) int {
+	if code < 0 || int(code) >= len(httpCodes) {
+		return 500
+	}
+	return httpCodes[code]
 }
 
 // convertSpan takes an OpenCensus span and returns a Datadog span.
@@ -60,16 +89,30 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 	if s.ParentSpanID != (trace.SpanID{}) {
 		span.ParentID = binary.BigEndian.Uint64(s.ParentSpanID[:])
 	}
+
+	httpCode := httpCodeInt(s.Status.Code)
+	span.Meta[ext.HTTPCode] = strconv.Itoa(httpCode)
+
 	switch s.SpanKind {
 	case trace.SpanKindClient:
 		span.Type = "client"
+		if httpCode >= 400 && httpCode < 500 {
+			span.Error = 1
+		}
 	case trace.SpanKindServer:
 		span.Type = "server"
+		if httpCode >= 500 && httpCode < 600 {
+			span.Error = 1
+		}
+	default:
+		if httpCode >= 500 && httpCode < 600 {
+			span.Error = 1
+		}
 	}
+
 	statusKey := keyStatusDescription
-	if code := s.Status.Code; code != 0 {
+	if span.Error == 1 {
 		statusKey = ext.ErrorMsg
-		span.Error = 1
 		span.Meta[ext.ErrorType] = canonicalCodeString(s.Status.Code)
 	}
 	if msg := s.Status.Message; msg != "" {
