@@ -91,8 +91,6 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 	}
 
 	httpCode := httpCodeInt(s.Status.Code)
-	span.Meta[ext.HTTPCode] = strconv.Itoa(httpCode)
-
 	switch s.SpanKind {
 	case trace.SpanKindClient:
 		span.Type = "client"
@@ -110,14 +108,19 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 		}
 	}
 
-	statusKey := keyStatusDescription
 	if span.Error == 1 {
-		statusKey = ext.ErrorMsg
 		span.Meta[ext.ErrorType] = canonicalCodeString(s.Status.Code)
+		if msg := s.Status.Message; msg != "" {
+			span.Meta[ext.ErrorMsg] = msg
+		}
 	}
+
+	span.Meta[keyStatusCode] = strconv.Itoa(int(s.Status.Code))
+	span.Meta[keyStatus] = canonicalCodeString(s.Status.Code)
 	if msg := s.Status.Message; msg != "" {
-		span.Meta[statusKey] = msg
+		span.Meta[keyStatusDescription] = msg
 	}
+
 	for key, val := range e.opts.GlobalTags {
 		setTag(span, key, val)
 	}
@@ -130,6 +133,8 @@ func (e *traceExporter) convertSpan(s *trace.SpanData) *ddSpan {
 const (
 	keySamplingPriority     = "_sampling_priority_v1"
 	keyStatusDescription    = "opencensus.status_description"
+	keyStatusCode           = "opencensus.status_code"
+	keyStatus               = "opencensus.status"
 	keySpanName             = "span.name"
 	keySamplingPriorityRate = "_sampling_priority_rate_v1"
 )
